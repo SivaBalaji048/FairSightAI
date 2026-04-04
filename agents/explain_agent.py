@@ -34,7 +34,7 @@ def _prepare_features(df, outcome_col, sensitive_cols):
             X[col] = le.fit_transform(X[col].astype(str))
             label_encoders[col] = le
 
-    X = X.fillna(X.median())
+    X = X.fillna(X.median(numeric_only=True))
     feature_names = list(X.columns)
     scaler = StandardScaler()
     X_scaled = pd.DataFrame(scaler.fit_transform(X), columns=feature_names)
@@ -54,12 +54,15 @@ def compute_shap_values(X_df, y):
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_df)
 
-    # SHAP returns for each class; take positive class
+    # SHAP can return a list or 3D array (n_samples, n_features, n_classes);
+    # take the positive class (last class axis)
     if isinstance(shap_values, list):
-        shap_values = shap_values[-1]  # last class = positive
+        shap_values = shap_values[-1]
+    elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+        shap_values = shap_values[:, :, -1]
 
     mean_abs_shap = np.abs(shap_values).mean(axis=0)
-    shap_by_feature = dict(zip(X_df.columns, np.round(mean_abs_shap, 6)))
+    shap_by_feature = dict(zip(X_df.columns, [round(float(v), 6) for v in mean_abs_shap]))
     # Sort by importance
     shap_by_feature = dict(
         sorted(shap_by_feature.items(), key=lambda x: x[1], reverse=True)
@@ -167,7 +170,7 @@ def generate_counterfactuals(df, model, outcome_col, sensitive_cols, feature_nam
 
     counterfactuals = []
     for idx, row in negatives.iterrows():
-        x = X_df.loc[idx].values.reshape(1, -1)
+        x = X_df.loc[idx].values.reshape(1, -1).copy()
         pred = model.predict(x)[0]
 
         if pred == 1:
@@ -179,7 +182,12 @@ def generate_counterfactuals(df, model, outcome_col, sensitive_cols, feature_nam
         # Get SHAP values for this instance
         import shap
         explainer = shap.TreeExplainer(model)
-        sv = explainer.shap_values(x)[-1].flatten()
+        sv = explainer.shap_values(x)
+        if isinstance(sv, list):
+            sv = sv[-1]
+        elif isinstance(sv, np.ndarray) and sv.ndim == 3:
+            sv = sv[:, :, -1]
+        sv = sv.flatten()
 
         # Sort features by negative SHAP contribution (pushing toward negative)
         sorted_idx = np.argsort(sv)
@@ -199,24 +207,25 @@ def generate_counterfactuals(df, model, outcome_col, sensitive_cols, feature_nam
 
             # Move toward the positive group's mean
             positive_group = df[df[outcome_col] == 1]
+            if not pd.api.types.is_numeric_dtype(df[fname]):
+                continue
             target_val = positive_group[fname].median()
-            if pd.api.types.is_numeric_dtype(df[fname]):
-                direction = 1 if target_val > current_val else -1
-                new_val = current_val + direction * std_val * 0.5
-                x_new = x.copy()
-                x_new[0, feat_idx] = new_val
-                new_pred = model.predict(x_new)[0]
-                cf_features[fname] = {
-                    "original": round(float(current_val), 2),
-                    "proposed": round(float(new_val), 2),
-                    "change": round(float(new_val - current_val), 2),
-                }
-                if new_pred == 1:
-                    changed.append(fname)
-                    break
-                else:
-                    x[0, feat_idx] = new_val
-                    changed.append(fname)
+            direction = 1 if target_val > current_val else -1
+            new_val = current_val + direction * std_val * 0.5
+            x_new = x.copy()
+            x_new[0, feat_idx] = new_val
+            new_pred = model.predict(x_new)[0]
+            cf_features[fname] = {
+                "original": round(float(current_val), 2),
+                "proposed": round(float(new_val), 2),
+                "change": round(float(new_val - current_val), 2),
+            }
+            if new_pred == 1:
+                changed.append(fname)
+                break
+            else:
+                x[0, feat_idx] = new_val
+                changed.append(fname)
 
         cf_row = negatives.loc[idx]
         cf = {
@@ -412,10 +421,12 @@ def explain_individual_case(row, model, X_train, feature_names, sensitive_cols, 
 
     # SHAP explanation for this instance
     explainer = shap.TreeExplainer(model)
-    sv = explainer.shap_values(x)[0]  # for positive class
-    if not isinstance(sv, np.ndarray) or sv.ndim == 1:
-        pass
-    else:
+    sv = explainer.shap_values(x)
+    if isinstance(sv, list):
+        sv = sv[-1]
+    elif isinstance(sv, np.ndarray) and sv.ndim == 3:
+        sv = sv[:, :, -1]
+    if sv.ndim > 1:
         sv = sv.flatten()
 
     feature_importance = list(zip(feature_names, np.abs(sv).flatten()))

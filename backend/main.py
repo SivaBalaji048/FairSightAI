@@ -2,6 +2,7 @@
 FairLens - Backend FastAPI Application
 Routes: /upload, /analyze, /explain, /mitigate, /report
 """
+import json
 import uuid
 from pathlib import Path
 from datetime import datetime
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import Column, Float, Integer, String, create_engine, inspect, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from backend.shared_config import DATABASE_URL, ALLOWED_ORIGINS, OPENROUTER_API_KEY
+from backend.shared_config import DATABASE_URL, ALLOWED_ORIGINS, OPENROUTER_API_KEY, AI_MODEL
 from agents.data_agent import (
     parse_file,
     profile_dataset,
@@ -107,11 +108,9 @@ class ExplainCaseRequest(BaseModel):
     row_data: dict
 
 class MitigateSimulateRequest(BaseModel):
-    dataset_id: str
     domain: str = "general"
 
 class MitigateApplyRequest(BaseModel):
-    dataset_id: str
     strategy: str
 
 class ReportRequest(BaseModel):
@@ -303,6 +302,8 @@ async def explain_bias(dataset_id: str, req: ExplainRequest):
         return result
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid dataset configuration.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Explanation failed: {str(e)}")
     finally:
         db.close()
 
@@ -494,6 +495,220 @@ async def get_report(req: ReportRequest | None = None):
         db.close()
 
 
+@app.get("/report/{dataset_id}/json")
+async def get_report_json(dataset_id: str):
+    """
+    Compile and return a full fairness audit report as JSON for the given dataset.
+    Includes before/after mitigation comparison, bias findings, recommendations.
+    """
+    import json as _json
+    db = SessionLocal()
+    try:
+        # Fetch dataset
+        record = db.query(DatasetRecord).filter(
+            DatasetRecord.dataset_id == dataset_id
+        ).first()
+        if not record:
+            raise HTTPException(status_code=404, detail="Dataset not found.")
+
+        # Fetch most recent analysis for this dataset
+        analysis_record = (
+            db.query(AnalysisRecord)
+            .filter(AnalysisRecord.dataset_name == record.original_filename)
+            .order_by(AnalysisRecord.timestamp.desc())
+            .first()
+        )
+
+        dataset_info = {
+            "filename": record.original_filename,
+            "row_count": record.row_count,
+            "column_count": record.column_count,
+            "outcome_column": record.outcome_column,
+        }
+
+        # Parse stored analysis data
+        analysis_data = {}
+        if analysis_record and analysis_record.metrics_json:
+            try:
+                parsed = _json.loads(analysis_record.metrics_json)
+                if isinstance(parsed, dict):
+                    analysis_data = parsed
+            except (ValueError, TypeError):
+                # metrics_json may be a Python repr string
+                import ast
+                try:
+                    parsed = ast.literal_eval(analysis_record.metrics_json)
+                    if isinstance(parsed, dict):
+                        analysis_data = parsed
+                except Exception:
+                    pass
+
+        # Run mitigation simulation to get before/after data
+        mitigation_data = {}
+        file_path = Path(record.file_path)
+        if record.configured and file_path.exists():
+            try:
+                from agents.agent_utils import parse_file as _parse
+            except ImportError:
+                from agents.data_agent import parse_file as _parse
+
+            try:
+                sensitive_cols_raw = record.sensitive_attributes_json
+                try:
+                    sensitive_cols = _json.loads(sensitive_cols_raw)
+                except (ValueError, TypeError):
+                    sensitive_cols = []
+
+                df = _parse(file_path)
+                sim = run_all_simulations(df, sensitive_cols, record.outcome_column)
+                sim.pop("models", None)
+                mitigation_data = sim
+            except Exception:
+                mitigation_data = {}
+
+        # Build full report via report agent
+        full = generate_full_report(
+            dataset_info=dataset_info,
+            domain="general",
+            analysis=analysis_data if analysis_data else None,
+            explanation=None,
+            mitigation=mitigation_data if mitigation_data else None,
+        )
+
+        report_obj = full["report"]
+
+        # Expose risk score before/after
+        before_risk = report_obj.get("risk_score", 0)
+        best_strategy = None
+        best_after_fairness = None
+        best_after_accuracy = None
+        strategies = mitigation_data.get("strategies", [])
+        baseline = mitigation_data.get("baseline", {})
+
+        recommended = [s for s in strategies if s.get("recommendation") == "recommended"]
+        consider = [s for s in strategies if s.get("recommendation") == "consider"]
+        best_pool = recommended or consider
+
+        if best_pool:
+            best_strategy = max(best_pool, key=lambda s: s.get("fairness_score_after", 0))
+            best_after_fairness = best_strategy.get("fairness_score_after")
+            best_after_accuracy = best_strategy.get("accuracy_after")
+
+        from agents.report_agent import export_json as _export_json
+        clean = _export_json(report_obj)
+
+        clean["report_id"] = report_obj.get("report_id", f"RPT-{dataset_id}")
+        clean["generated_at"] = report_obj.get("generated_at", datetime.utcnow().isoformat())
+        clean["dataset"] = dataset_info
+        clean["risk_score"] = before_risk
+        clean["before_after"] = {
+            "baseline_fairness": baseline.get("fairness_score"),
+            "baseline_accuracy": baseline.get("accuracy"),
+            "best_strategy": best_strategy.get("strategy") if best_strategy else None,
+            "best_after_fairness": best_after_fairness,
+            "best_after_accuracy": best_after_accuracy,
+            "fairness_improvement": (
+                round(best_after_fairness - baseline.get("fairness_score", 0), 4)
+                if best_after_fairness is not None and baseline.get("fairness_score") is not None
+                else None
+            ),
+            "accuracy_change": (
+                round(best_after_accuracy - baseline.get("accuracy", 0), 4)
+                if best_after_accuracy is not None and baseline.get("accuracy") is not None
+                else None
+            ),
+            "all_strategies": strategies,
+        }
+
+        # Save JSON report
+        try:
+            r_id = clean["report_id"]
+            (Path("output_reports") / f"{r_id}.json").write_text(
+                _json.dumps(clean, indent=2, default=str)
+            )
+        except Exception:
+            pass
+
+        return clean
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
+    finally:
+        db.close()
+
+
+@app.get("/report/{dataset_id}/html", response_class=HTMLResponse)
+async def get_report_html(dataset_id: str):
+    """
+    Return a styled, printable HTML version of the fairness audit report.
+    """
+    import json as _json
+    db = SessionLocal()
+    try:
+        record = db.query(DatasetRecord).filter(
+            DatasetRecord.dataset_id == dataset_id
+        ).first()
+        if not record:
+            raise HTTPException(status_code=404, detail="Dataset not found.")
+
+        analysis_record = (
+            db.query(AnalysisRecord)
+            .filter(AnalysisRecord.dataset_name == record.original_filename)
+            .order_by(AnalysisRecord.timestamp.desc())
+            .first()
+        )
+
+        dataset_info = {
+            "filename": record.original_filename,
+            "row_count": record.row_count,
+            "column_count": record.column_count,
+            "outcome_column": record.outcome_column,
+        }
+
+        analysis_data = {}
+        if analysis_record and analysis_record.metrics_json:
+            try:
+                parsed = _json.loads(analysis_record.metrics_json)
+                if isinstance(parsed, dict):
+                    analysis_data = parsed
+            except (ValueError, TypeError):
+                pass
+
+        mitigation_data = {}
+        file_path = Path(record.file_path)
+        if record.configured and file_path.exists():
+            try:
+                from agents.data_agent import parse_file as _parse
+                sensitive_cols_raw = record.sensitive_attributes_json
+                try:
+                    sensitive_cols = _json.loads(sensitive_cols_raw)
+                except (ValueError, TypeError):
+                    sensitive_cols = []
+                df = _parse(file_path)
+                sim = run_all_simulations(df, sensitive_cols, record.outcome_column)
+                sim.pop("models", None)
+                mitigation_data = sim
+            except Exception:
+                mitigation_data = {}
+
+        full = generate_full_report(
+            dataset_info=dataset_info,
+            domain="general",
+            analysis=analysis_data if analysis_data else None,
+            explanation=None,
+            mitigation=mitigation_data if mitigation_data else None,
+        )
+
+        return HTMLResponse(content=full["html_str"])
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"HTML report generation failed: {str(e)}")
+    finally:
+        db.close()
+
+
 @app.get("/analyses")
 async def list_analyses():
     """List all past analyses."""
@@ -654,5 +869,9 @@ async def analyze_dataset_full(dataset_id: str, req: AnalyzeDatasetRequest):
         result["analysis_id"] = analysis_record.analysis_id
         return result
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
     finally:
         db.close()

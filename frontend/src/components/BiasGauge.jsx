@@ -1,53 +1,103 @@
-import { useCallback } from 'react'
+import { useEffect, useRef } from 'react'
+import { gsap } from 'gsap'
 
-export default function BiasGauge({ score = 0, size = 200, label = 'Bias Risk Score' }) {
+export default function BiasGauge({ score = 0, size = 160, label = null }) {
+  const arcRef = useRef(null)
+  const textRef = useRef(null)
+
   const clamped = Math.min(100, Math.max(0, score))
-  const color = clamped >= 60 ? '#EF4444' : clamped >= 30 ? '#F59E0B' : '#22C55E'
-  const severity = clamped >= 60 ? 'High' : clamped >= 30 ? 'Medium' : 'Low'
-  const radius = 90
-  const stroke = 14
-  const circumference = Math.PI * radius
-  const progress = (clamped / 100) * circumference
-  const cx = size / 2
+  const color = clamped <= 30
+    ? '#10b981'   // low risk — emerald
+    : clamped <= 60
+    ? '#f59e0b'   // medium — amber
+    : '#ef4444'   // high — red
 
-  const getGradientId = useCallback(() => `gauge-${color.replace('#', '')}`, [color])
+  const riskLabel = clamped <= 30 ? 'LOW RISK' : clamped <= 60 ? 'MED RISK' : 'HIGH RISK'
+
+  const radius      = (size / 2) - 12
+  const strokeW     = 8
+  const circumf     = Math.PI * radius
+  const targetDash  = (clamped / 100) * circumf
+
+  useEffect(() => {
+    if (!arcRef.current) return
+    // Animate from 0 to targetDash
+    gsap.fromTo(arcRef.current,
+      { strokeDashoffset: circumf },
+      {
+        strokeDashoffset: circumf - targetDash,
+        duration: 1.4,
+        ease: 'power2.out',
+        delay: 0.2,
+      }
+    )
+    // Animate text counter
+    if (textRef.current) {
+      const obj = { val: 0 }
+      gsap.to(obj, {
+        val: clamped,
+        duration: 1.2,
+        ease: 'power2.out',
+        delay: 0.2,
+        snap: { val: 1 },
+        onUpdate: () => { if (textRef.current) textRef.current.textContent = Math.round(obj.val) },
+      })
+    }
+  }, [score])
 
   return (
-    <div className="flex flex-col items-center">
-      <svg width={size} height={size / 2 + 30} viewBox={`0 0 ${size} ${size / 2 + 30}`}>
-        <defs>
-          <linearGradient id={getGradientId()} x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#22C55E" />
-            <stop offset="50%" stopColor="#F59E0B" />
-            <stop offset="100%" stopColor="#EF4444" />
-          </linearGradient>
-        </defs>
-        {/* Background arc */}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+      <svg width={size} height={size / 2 + 20} viewBox={`0 0 ${size} ${size / 2 + 20}`}>
+        {/* Background track */}
         <path
-          d={`M ${cx} ${size / 2 + 20} A ${radius} ${radius} 0 0 1 ${cx + radius} ${size / 2 + 20}`}
+          d={`M ${12} ${size/2} A ${radius} ${radius} 0 0 1 ${size-12} ${size/2}`}
           fill="none"
-          stroke="#E5E7EB"
-          strokeWidth={stroke}
+          stroke="rgba(255,255,255,0.06)"
+          strokeWidth={strokeW}
           strokeLinecap="round"
         />
-        {/* Progress arc */}
+        {/* Animated value arc */}
         <path
-          d={`M ${cx} ${size / 2 + 20} A ${radius} ${radius} 0 0 1 ${cx + radius} ${size / 2 + 20}`}
+          ref={arcRef}
+          d={`M ${12} ${size/2} A ${radius} ${radius} 0 0 1 ${size-12} ${size/2}`}
           fill="none"
-          stroke={`url(#${getGradientId()})`}
-          strokeWidth={stroke}
+          stroke={color}
+          strokeWidth={strokeW}
           strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference - progress}
+          strokeDasharray={circumf}
+          strokeDashoffset={circumf}
+          style={{ filter: `drop-shadow(0 0 6px ${color}60)` }}
         />
-        {/* Score text */}
-        <text x={cx} y={size / 2 + 8} textAnchor="middle" fontSize="36" fontWeight="bold" fill={color}>
-          {Math.round(clamped)}
+        {/* Score number */}
+        <text
+          ref={textRef}
+          x={size / 2}
+          y={size / 2 - 4}
+          textAnchor="middle"
+          fill={color}
+          fontSize={size * 0.22}
+          fontFamily='"Space Grotesk", sans-serif'
+          fontWeight="500"
+        >
+          0
         </text>
-        <text x={cx} y={size / 2 + 24} textAnchor="middle" fontSize="11" fill="#6B7280">/ 100</text>
+        {/* Risk label */}
+        <text
+          x={size / 2}
+          y={size / 2 + 14}
+          textAnchor="middle"
+          fill="rgba(122,134,161,0.8)"
+          fontSize="9"
+          fontFamily='"Space Grotesk", sans-serif'
+          fontWeight="500"
+          letterSpacing="0.1em"
+        >
+          {riskLabel}
+        </text>
       </svg>
-      <span className="text-xs font-semibold mt-1" style={{ color }}>{severity} Risk</span>
+      {label && (
+        <span style={{ fontSize: '11px', color: '#7a86a1', fontFamily: 'Inter, sans-serif' }}>{label}</span>
+      )}
     </div>
   )
 }

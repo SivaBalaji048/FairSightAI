@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { gsap } from 'gsap'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer } from 'recharts'
 import { API_BASE } from '../config'
 import AIInsightCard from '../components/AIInsightCard'
@@ -8,14 +9,36 @@ import CounterfactualTable from '../components/CounterfactualTable'
 
 const PROXY_THRESHOLD = 0.6
 
+// ── Magnetic hover helper ─────────────────────────────────────────
+const magneticMove = (e) => {
+  const rect = e.currentTarget.getBoundingClientRect()
+  const dx = (e.clientX - (rect.left + rect.width/2)) * 0.3
+  const dy = (e.clientY - (rect.top  + rect.height/2)) * 0.3
+  gsap.to(e.currentTarget, { x: dx, y: dy, duration: 0.3, ease: 'power2.out' })
+}
+const magneticLeave = (e) => gsap.to(e.currentTarget, { x: 0, y: 0, duration: 0.5, ease: 'elastic.out(1,0.5)' })
+
 export default function Explain() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [mode, setMode] = useState('simple')
   const [caseInput, setCaseInput] = useState('')
   const [caseResult, setCaseResult] = useState(null)
+  const containerRef = useRef(null)
+
+  // ── GSAP entry animation ────────────────────────────────────────
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      gsap.fromTo('.anim-card',
+        { opacity: 0, y: 30 },
+        { opacity: 1, y: 0, duration: 0.6, ease: 'power3.out', stagger: 0.1, delay: 0.1 }
+      )
+    }, containerRef)
+    return () => ctx.revert()
+  }, [result, error])
 
   const handleExplain = async () => {
     if (!id) return
@@ -52,16 +75,30 @@ export default function Explain() {
     }
   }
 
+  if (!id) {
+    return (
+      <div ref={containerRef} style={{ paddingTop: '88px', paddingBottom: '80px', padding: '88px 48px 80px', maxWidth: '1100px', margin: '0 auto', minHeight: '100vh' }}>
+        <h2 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '32px', fontWeight: 500, letterSpacing: '-0.02em', color: '#f0f4ff', marginBottom: '24px' }}>Explainability</h2>
+        <div className="glass-card anim-card" style={{ maxWidth: '480px', padding: '48px', textAlign: 'center' }}>
+          <div style={{ fontSize: '32px', marginBottom: '16px' }}>🔍</div>
+          <h3 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '18px', fontWeight: 500, color: '#f0f4ff', marginBottom: '8px' }}>No dataset selected</h3>
+          <p style={{ fontSize: '14px', color: '#7a86a1', fontFamily: 'Inter, sans-serif', marginBottom: '24px' }}>Upload and configure a dataset first.</p>
+          <button onClick={() => navigate('/upload')} className="btn-primary" onMouseMove={magneticMove} onMouseLeave={magneticLeave}>Go to Upload →</button>
+        </div>
+      </div>
+    )
+  }
+
   if (!result) {
     return (
-      <div>
-        <h2 className="text-2xl font-bold mb-6">Explainability</h2>
-        <div className="card max-w-md">
-          <p className="text-sm text-gray-500 mb-4">
+      <div ref={containerRef} style={{ paddingTop: '88px', paddingBottom: '80px', padding: '88px 48px 80px', maxWidth: '1100px', margin: '0 auto', minHeight: '100vh' }}>
+        <h2 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '32px', fontWeight: 500, letterSpacing: '-0.02em', color: '#f0f4ff', marginBottom: '24px' }}>Explainability</h2>
+        <div className="glass-card anim-card" style={{ maxWidth: '480px', padding: '32px' }}>
+          <p style={{ fontSize: '14px', color: '#7a86a1', fontFamily: 'Inter, sans-serif', marginBottom: '16px' }}>
             Generate SHAP-based feature importance, counterfactuals, and AI explanations.
           </p>
-          {error && <div className="mb-4 p-3 bg-red-50 rounded text-red-700 text-sm">{error}</div>}
-          <button onClick={handleExplain} disabled={loading} className="btn-primary w-full disabled:opacity-50">
+          {error && <div style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '10px', background: 'rgba(239,68,68,0.08)', border: '0.5px solid rgba(239,68,68,0.2)', color: '#ef4444', fontSize: '13px', fontFamily: 'Inter, sans-serif' }}>{error}</div>}
+          <button onClick={handleExplain} disabled={loading} className="btn-primary" style={{ width: '100%', opacity: loading ? 0.5 : 1 }} onMouseMove={magneticMove} onMouseLeave={magneticLeave}>
             {loading ? 'Analyzing...' : 'Run Explainability Analysis'}
           </button>
         </div>
@@ -75,52 +112,53 @@ export default function Explain() {
   const proxyEntries = Object.entries(proxies)
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div ref={containerRef} style={{ paddingTop: '88px', paddingBottom: '80px', padding: '88px 48px 80px', maxWidth: '1100px', margin: '0 auto', minHeight: '100vh' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '32px' }}>
         <div>
-          <h2 className="text-2xl font-bold">Explainability</h2>
-          <p className="text-sm text-gray-500 mt-1">Why the model makes its decisions</p>
+          <p style={{ fontSize: '12px', fontWeight: 500, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#00e5ff', fontFamily: '"Space Grotesk", sans-serif', marginBottom: '8px' }}>Insights</p>
+          <h2 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '32px', fontWeight: 500, letterSpacing: '-0.02em', color: '#f0f4ff' }}>Explainability</h2>
+          <p style={{ fontSize: '14px', color: '#7a86a1', fontFamily: 'Inter, sans-serif', marginTop: '4px' }}>Why the model makes its decisions</p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setMode(mode === 'simple' ? 'technical' : 'simple')}
-            className="btn-secondary text-xs"
-          >
-            {mode === 'simple' ? 'Switch to Technical' : 'Switch to Simple'}
-          </button>
-        </div>
+        <button
+          onClick={() => setMode(mode === 'simple' ? 'technical' : 'simple')}
+          className="btn-ghost"
+          style={{ fontSize: '12px' }}
+          onMouseMove={magneticMove} onMouseLeave={magneticLeave}
+        >
+          {mode === 'simple' ? 'Switch to Technical' : 'Switch to Simple'}
+        </button>
       </div>
 
       {/* SHAP Feature Importance */}
-      <div className="card mb-6">
-        <h4 className="font-semibold mb-3">SHAP Feature Importance</h4>
+      <div className="glass-card anim-card" style={{ padding: '28px', marginBottom: '24px' }}>
+        <h4 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '16px', fontWeight: 500, color: '#f0f4ff', marginBottom: '16px' }}>SHAP Feature Importance</h4>
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={shapData} layout="vertical" margin={{ left: 140 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-            <XAxis type="number" tick={{ fontSize: 12 }} />
-            <YAxis type="category" dataKey="feature" width={140} tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <XAxis type="number" tick={{ fontSize: 12, fill: '#7a86a1' }} />
+            <YAxis type="category" dataKey="feature" width={140} tick={{ fontSize: 12, fill: '#7a86a1' }} />
+            <Tooltip contentStyle={{ background: '#0f1424', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#f0f4ff' }} />
             <Bar dataKey="importance" radius={[0, 4, 4, 0]}>
               {shapData.map((entry, i) => (
                 <Cell
                   key={i}
                   fill={
-                    entry.is_proxy ? '#EF4444' :
-                    proxyEntries.some(([proxy]) => entry.feature === proxy) ? '#EF4444' :
-                    '#3B82F6'
+                    entry.is_proxy ? '#ef4444' :
+                    proxyEntries.some(([proxy]) => entry.feature === proxy) ? '#ef4444' :
+                    '#00e5ff'
                   }
                 />
               ))}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
-        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 bg-blue-500 rounded-sm" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '12px', fontSize: '12px', color: '#7a86a1' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '12px', background: '#00e5ff', borderRadius: '3px' }} />
             <span>Feature importance</span>
           </div>
-          <div className="flex items-center gap-1">
-            <div className="w-3 h-3 bg-red-500 rounded-sm" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '12px', background: '#ef4444', borderRadius: '3px' }} />
             <span>Proxy variable (correlated with sensitive attribute)</span>
           </div>
         </div>
@@ -128,23 +166,23 @@ export default function Explain() {
 
       {/* Proxy Correlations */}
       {proxyEntries.length > 0 && (
-        <div className="card mb-6 border-l-4 border-red-400">
-          <h4 className="font-semibold mb-3 text-red-700">⚠ Proxy Variables Detected</h4>
-          <table className="w-full text-sm">
-            <thead className="text-left text-gray-500 border-b">
-              <tr>
-                <th className="pb-2">Feature</th>
-                <th className="pb-2">Correlated With</th>
-                <th className="pb-2">Correlation</th>
+        <div className="glass-card anim-card" style={{ padding: '28px', marginBottom: '24px', borderLeft: '3px solid #ef4444' }}>
+          <h4 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '16px', fontWeight: 500, color: '#ef4444', marginBottom: '16px' }}>⚠ Proxy Variables Detected</h4>
+          <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
+                {['Feature', 'Correlated With', 'Correlation'].map(h => (
+                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: '#7a86a1', fontSize: '11px', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {proxyEntries.map(([feat, corrs]) =>
                 corrs.map((c, i) => (
-                  <tr key={`${feat}-${i}`} className="border-b border-gray-100">
-                    <td className="py-2 font-mono text-sm">{feat}</td>
-                    <td className="py-2">{c.sensitive_attribute}</td>
-                    <td className="py-2 font-mono" style={{ color: c.correlation > 0.8 ? '#EF4444' : '#F59E0B' }}>
+                  <tr key={`${feat}-${i}`} style={{ borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+                    <td style={{ padding: '10px 12px', fontFamily: '"JetBrains Mono", monospace', fontSize: '13px', color: '#f0f4ff' }}>{feat}</td>
+                    <td style={{ padding: '10px 12px', color: '#f0f4ff' }}>{c.sensitive_attribute}</td>
+                    <td style={{ padding: '10px 12px', fontFamily: '"JetBrains Mono", monospace', color: c.correlation > 0.8 ? '#ef4444' : '#f59e0b' }}>
                       {c.correlation.toFixed(4)}
                     </td>
                   </tr>
@@ -156,10 +194,12 @@ export default function Explain() {
       )}
 
       {/* Counterfactual Comparison */}
-      <CounterfactualTable groupComparison={result.counterfactuals?.group_comparison || {}} />
+      <div className="anim-card">
+        <CounterfactualTable groupComparison={result.counterfactuals?.group_comparison || {}} />
+      </div>
 
       {/* AI Explanation */}
-      <div className="mt-6">
+      <div className="anim-card" style={{ marginTop: '24px' }}>
         <AIInsightCard
           title="AI Explanation"
           mode={mode}
@@ -172,11 +212,29 @@ export default function Explain() {
         />
       </div>
 
+      {/* Proceed to Mitigate */}
+      <div className="glass-card anim-card" style={{ marginTop: '24px', padding: '28px', borderLeft: '3px solid #8b5cf6' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h4 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '16px', fontWeight: 500, color: '#8b5cf6' }}>Ready to fix the bias?</h4>
+            <p style={{ fontSize: '13px', color: '#7a86a1', fontFamily: 'Inter, sans-serif', marginTop: '4px' }}>Explore mitigation strategies to improve fairness while preserving accuracy.</p>
+          </div>
+          <button
+            onClick={() => navigate(`/mitigate/${id}`)}
+            className="btn-primary"
+            style={{ whiteSpace: 'nowrap' }}
+            onMouseMove={magneticMove} onMouseLeave={magneticLeave}
+          >
+            Proceed to Mitigate →
+          </button>
+        </div>
+      </div>
+
       {/* Individual Case Checker */}
-      <div className="card mt-6">
-        <h4 className="font-semibold mb-3">Individual Case Checker</h4>
-        <p className="text-xs text-gray-500 mb-3">
-          Paste a comma-separated row (e.g. <code className="bg-gray-100 px-1 rounded">age:30,gender:Female,race:Black,income:50000</code>)
+      <div className="glass-card anim-card" style={{ marginTop: '24px', padding: '28px' }}>
+        <h4 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '16px', fontWeight: 500, color: '#f0f4ff', marginBottom: '12px' }}>Individual Case Checker</h4>
+        <p style={{ fontSize: '12px', color: '#7a86a1', fontFamily: 'Inter, sans-serif', marginBottom: '12px' }}>
+          Paste a comma-separated row (e.g. <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px', fontFamily: '"JetBrains Mono", monospace', fontSize: '11px' }}>age:30,gender:Female,race:Black,income:50000</code>)
           to see the model's prediction and top reasons.
         </p>
         <input
@@ -184,54 +242,54 @@ export default function Explain() {
           value={caseInput}
           onChange={(e) => setCaseInput(e.target.value)}
           placeholder="col1:val1, col2:val2, col3:val3"
-          className="w-full border rounded-lg px-3 py-2 text-sm font-mono mb-3"
+          className="fl-input"
+          style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '13px', marginBottom: '12px' }}
         />
-        <button onClick={handleCaseCheck} className="btn-primary disabled:opacity-50">
+        <button onClick={handleCaseCheck} className="btn-primary" style={{ opacity: !caseInput.trim() ? 0.5 : 1 }} onMouseMove={magneticMove} onMouseLeave={magneticLeave}>
           Check Case
         </button>
 
         {caseResult && (
-          <div className="mt-4 p-4 rounded-lg border">
+          <div style={{ marginTop: '16px', padding: '20px', borderRadius: '12px', border: '0.5px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
             {caseResult.error ? (
-              <p className="text-red-600 text-sm">{caseResult.error}</p>
+              <p style={{ color: '#ef4444', fontSize: '13px', fontFamily: 'Inter, sans-serif' }}>{caseResult.error}</p>
             ) : (
               <div>
-                <div className="flex gap-4 mb-3">
+                <div style={{ display: 'flex', gap: '32px', marginBottom: '16px' }}>
                   <div>
-                    <p className="text-xs text-gray-500">Prediction</p>
-                    <p className={`text-2xl font-bold ${caseResult.prediction ? 'text-green-600' : 'text-red-600'}`}>
+                    <p style={{ fontSize: '11px', color: '#7a86a1', fontFamily: 'Inter, sans-serif', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Prediction</p>
+                    <p style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '24px', fontWeight: 500, color: caseResult.prediction ? '#10b981' : '#ef4444' }}>
                       {caseResult.prediction ? 'Positive' : 'Negative'}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-500">Confidence</p>
-                    <p className="text-2xl font-bold">{(caseResult.confidence * 100).toFixed(1)}%</p>
+                    <p style={{ fontSize: '11px', color: '#7a86a1', fontFamily: 'Inter, sans-serif', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Confidence</p>
+                    <p style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '24px', fontWeight: 500, color: '#f0f4ff' }}>{(caseResult.confidence * 100).toFixed(1)}%</p>
                   </div>
                   {caseResult.any_group_disparity_flag && (
-                    <div className="px-3 py-1 bg-red-50 border border-red-200 rounded">
-                      <p className="text-xs text-red-700 font-semibold">⚠ Disparate impact likely</p>
+                    <div style={{ padding: '8px 16px', background: 'rgba(239,68,68,0.08)', border: '0.5px solid rgba(239,68,68,0.2)', borderRadius: '10px', display: 'flex', alignItems: 'center' }}>
+                      <p style={{ color: '#ef4444', fontSize: '12px', fontWeight: 500 }}>⚠ Disparate impact likely</p>
                     </div>
                   )}
                 </div>
-                <h5 className="text-sm font-semibold mb-2">Top 3 Reasons</h5>
-                <table className="w-full text-sm">
-                  <thead className="text-left text-gray-500 border-b">
-                    <tr>
-                      <th className="pb-2">Feature</th>
-                      <th className="pb-2">Value</th>
-                      <th className="pb-2">Direction</th>
-                      <th className="pb-2">Reason</th>
+                <h5 style={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '14px', fontWeight: 500, color: '#f0f4ff', marginBottom: '10px' }}>Top 3 Reasons</h5>
+                <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
+                      {['Feature', 'Value', 'Direction', 'Reason'].map(h => (
+                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: '#7a86a1', fontSize: '11px', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{h}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {caseResult.top_3_reasons?.map((r, i) => (
-                      <tr key={i} className="border-b border-gray-100">
-                        <td className="py-1.5 font-mono text-xs">{r.feature}</td>
-                        <td className="py-1.5">{r.value}</td>
-                        <td className={`py-1.5 font-semibold ${r.direction === '+' ? 'text-green-600' : 'text-red-600'}`}>
+                      <tr key={i} style={{ borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+                        <td style={{ padding: '8px 12px', fontFamily: '"JetBrains Mono", monospace', fontSize: '12px', color: '#f0f4ff' }}>{r.feature}</td>
+                        <td style={{ padding: '8px 12px', color: '#f0f4ff' }}>{r.value}</td>
+                        <td style={{ padding: '8px 12px', fontWeight: 500, color: r.direction === '+' ? '#10b981' : '#ef4444' }}>
                           {r.direction}
                         </td>
-                        <td className="py-1.5 text-gray-600 text-xs">{r.meaning}</td>
+                        <td style={{ padding: '8px 12px', color: '#7a86a1', fontSize: '12px' }}>{r.meaning}</td>
                       </tr>
                     ))}
                   </tbody>

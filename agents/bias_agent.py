@@ -218,6 +218,8 @@ def compute_model_bias(df, sensitive, outcome, feature_cols):
             f1 = f1_score(grp_y, grp_pred, zero_division=0)
             try:
                 auc = roc_auc_score(grp_y, grp_prob)
+                if np.isnan(auc):
+                    auc = 0.5
             except ValueError:
                 auc = 0.5
 
@@ -235,12 +237,18 @@ def compute_model_bias(df, sensitive, outcome, feature_cols):
         worst = min(f1_scores, key=f1_scores.get) if f1_scores else "N/A"
 
         # Overall metrics
+        try:
+            overall_auc = roc_auc_score(y_test, y_prob)
+            if np.isnan(overall_auc):
+                overall_auc = 0.5
+        except ValueError:
+            overall_auc = 0.5
         overall = {
             "accuracy": round(float(accuracy_score(y_test, y_pred)), 4),
             "precision": round(float(precision_score(y_test, y_pred, zero_division=0)), 4),
             "recall": round(float(recall_score(y_test, y_pred, zero_division=0)), 4),
             "f1": round(float(f1_score(y_test, y_pred, zero_division=0)), 4),
-            "auc_roc": round(float(roc_auc_score(y_test, y_prob)), 4),
+            "auc_roc": round(float(overall_auc), 4),
         }
 
         results[name] = {
@@ -337,6 +345,31 @@ def _compute_risk_score(metrics, model_perf, intersectional):
 
     return min(round(score, 1), 100.0)
 
+def _build_fallback_narrative(metrics, risk_score, domain_context):
+    severity = "high" if risk_score > 60 else ("medium" if risk_score > 30 else "low")
+    affected_groups = []
+    
+    di_flags = metrics.get("disparity_flags", {})
+    for grp, is_flagged in di_flags.items():
+        if is_flagged and str(grp) != "_intersection":
+            affected_groups.append(str(grp))
+            
+    if affected_groups:
+        summary = f"A deterministic fairness analysis indicates a {severity} risk of bias. The groups {', '.join(affected_groups)} are disproportionately affected based on the 80% rule (Disparate Impact Ratio < 0.8)."
+        recommendations = [f"Investigate outcomes for {', '.join(affected_groups)}", "Apply bias mitigation techniques like Reweighing or Equalized Odds", "Review feature correlation with sensitive attributes"]
+    else:
+        summary = f"A deterministic fairness analysis indicates a {severity} risk of bias. No specific groups were flagged under the 80% disparate impact threshold."
+        recommendations = ["Continue monitoring dataset for subtle biases", "Check intersectional fairness metrics"]
+
+    return {
+        "severity": severity,
+        "summary": summary,
+        "affected_groups": affected_groups,
+        "key_finding": f"Deterministic risk score computed at {risk_score}/100.",
+        "legal_context": domain_context,
+        "recommendations": recommendations,
+    }
+
 
 def generate_bias_narrative(metrics, model_perf, intersectional, domain, risk_score):
     """Use the AI model to write a plain-English bias summary."""
@@ -391,24 +424,8 @@ Respond ONLY as a valid JSON object (no markdown, no code fences):
         if text.endswith("```"):
             text = text.rsplit("\n", 1)[0]
         return json.loads(text.strip())
-    except json.JSONDecodeError:
-        return {
-            "severity": "high" if risk_score > 60 else ("medium" if risk_score > 30 else "low"),
-            "summary": "Bias detection completed but AI narrative was unavailable.",
-            "affected_groups": [],
-            "key_finding": "Metrics were computed successfully.",
-            "legal_context": domain_context,
-            "recommendations": ["Review metrics manually", "Consider mitigation techniques"],
-        }
-    except Exception as e:
-        return {
-            "severity": "high" if risk_score > 60 else ("medium" if risk_score > 30 else "low"),
-            "summary": f"AI narrative unavailable due to model error: {e}",
-            "affected_groups": [],
-            "key_finding": "Metrics computed without AI narrative.",
-            "legal_context": domain_context,
-            "recommendations": ["Review metrics manually"],
-        }
+    except (json.JSONDecodeError, Exception):
+        return _build_fallback_narrative(metrics, risk_score, domain_context)
 
 
 # ═══════════════════════════════════════════

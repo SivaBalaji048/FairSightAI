@@ -1,4 +1,4 @@
-# FairLens — AI Bias Detection Platform
+# FairSight — AI Bias Detection Platform
 
 A full-stack web application for detecting, explaining, and mitigating bias in AI-driven decision-making datasets.
 
