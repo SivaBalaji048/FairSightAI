@@ -11,4 +11,4 @@ pydantic>=2.6.0
 shap>=0.44.0
 scikit-learn>=1.4.0
 fairlearn>=0.10.0
-weasyprint>=61.0
+reportlab>=61.0
