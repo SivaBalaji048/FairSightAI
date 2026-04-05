@@ -1,0 +1,1 @@
+This file exists to force Git to track the empty public directory so Docker builds won't fail gracefully.
