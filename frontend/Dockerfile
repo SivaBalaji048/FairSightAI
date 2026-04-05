@@ -4,6 +4,9 @@ COPY frontend/package.json frontend/vite.config.js frontend/postcss.config.js fr
 COPY frontend/src ./src
 COPY frontend/public ./public
 RUN npm install
+
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
 FROM nginx:alpine
